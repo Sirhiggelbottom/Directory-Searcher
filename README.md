@@ -99,4 +99,4 @@ Directory Searcher is a Python application built using the Tkinter library. It a
 
 ## License
 
-This project is licensed under the [MIT License]
+This project is licensed under the [MIT License](LICENSE)
