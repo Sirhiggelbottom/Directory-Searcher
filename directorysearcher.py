@@ -8,6 +8,7 @@ import PyPDF2
 import magic
 import openpyxl
 import docx
+import zipfile, rarfile, py7zr, tarfile
 
 
 class DirectorySearcherApp:
@@ -78,7 +79,7 @@ class DirectorySearcherApp:
         deep_search_check = tk.Checkbutton(row_1_button_frame, text="Deep search", variable=self.deep_search_var)
         deep_search_check.grid(row=0, column=0, padx=5, pady=5)  # Align to the left
 
-        self.file_types = ["PDF", "Excel", "Word"]
+        self.file_types = ["PDF", "Excel", "Word", "zip"]
         self.choosen_file_type_var = tk.StringVar(value=self.file_types[0])
         file_type_dropdown = tk.OptionMenu(row_1_button_frame, self.choosen_file_type_var, *self.file_types)
         file_type_dropdown.grid(row=0, column=1, padx=5, pady=5)
@@ -141,27 +142,30 @@ class DirectorySearcherApp:
 
     def search_files(self, directory, keywords):
         # Define the file type filter
-        allowed_extensions = {".pdf", ".xlsx", ".docx"}  # Set of allowed extensions
+        #allowed_extensions = {".pdf", ".xlsx", ".docx", ".zip"}  # Set of allowed extensions
+        supported_file_types = {}  # Set of allowed extensions
         
         choosen_file_type = self.choosen_file_type_var.get().lower()
 
         if choosen_file_type == "word":
-            allowed_extensions = {".docx"}
+            supported_file_types = {".docx"}
         elif choosen_file_type == "excel":
-            allowed_extensions = {".xlsx"}
+            supported_file_types = {".xlsx"}
         elif choosen_file_type == "pdf":
-            allowed_extensions = {".pdf"}
+            supported_file_types = {".pdf"}
+        elif choosen_file_type == "zip":
+            supported_file_types = {".zip", ".rar", ".7z", ".tar"}
             
-        print(f"Choosen file type: {allowed_extensions}")
+        print(f"Choosen file type: {supported_file_types}")
 
         # Batch size for loading files in chunks
         batch_size = 1000
 
-        def file_batch_generator(directory, allowed_extensions, batch_size):
+        def file_batch_generator(directory, supported_file_types, batch_size):
             """Generator to yield batches of filtered files."""
             for root, dirs, files in os.walk(directory):
                 # Filter out files that don't have the allowed extensions
-                filtered_files = [f for f in files if any(f.lower().endswith(ext) for ext in allowed_extensions)]
+                filtered_files = [f for f in files if any(f.lower().endswith(allowed_filetypes) for allowed_filetypes in supported_file_types)]
                 #filtered_files = [f for f in files if any(f.lower().endswith(choosen_file_type))]
 
                 # Yield the current batch of files in chunks
@@ -173,7 +177,7 @@ class DirectorySearcherApp:
             matched_files = []
 
             # Create a generator for batches of files
-            file_batches = file_batch_generator(directory, allowed_extensions, batch_size)
+            file_batches = file_batch_generator(directory, supported_file_types, batch_size)
 
             # Iterate over each batch of files
             for batch in file_batches:
@@ -246,7 +250,9 @@ class DirectorySearcherApp:
 
                 for page in reader.pages:
                     pdf_text.append(page.extract_text())
-                    return pdf_text
+                
+                return pdf_text
+            
         except Exception as e:
             return file_path, f"Error while reading PDF content.\nBecause: {e}"
     
@@ -262,6 +268,7 @@ class DirectorySearcherApp:
                 for row in sheet.iter_rows(values_only=True):
                     sheet_content.append(row)
             return sheet_content
+        
         except Exception as e:
             return file_path, f"Error while reading Excel content.\nBecause: {e}"
         
@@ -269,13 +276,81 @@ class DirectorySearcherApp:
         """
         Retrives content from word documents paragraph by paragraph
         """
-        doc = docx.Document(file_path)
-        full_text = []
-        for paragraph in doc.paragraphs:
-            full_text.append(paragraph.text)
-        return '\n'.join(full_text)
+        try:
 
+            doc = docx.Document(file_path)
+            full_text = []
+
+            for paragraph in doc.paragraphs:
+                full_text.append(paragraph.text)
+
+            return '\n'.join(full_text)
+        except Exception as e:
+            return file_path, f"Error while reading word content.\nBecause: {e}"
+    
+    def read_zipfile(self, file_path):
+        """
+        Returns a list of file names from a zip archive
+        """
+        try:
+
+            zip_content = []
+
+            with zipfile.ZipFile(file_path, 'r') as zip_archive:
+                zip_content = zip_archive.namelist()
+
+                return zip_content
+        except Exception as e:
+            return file_path, f"Error while reading zip content.\nBecause: {e}"        
+
+    def read_rarfile(self, file_path):
+        """
+        Returns a list of file names from a rar archive
+        """
+        try:
+
+            rar_content = []
+
+            with rarfile.RarFile(file_path, 'r') as rar_archive:
+                rar_content = rar_archive.namelist()
+
+                return rar_content
+        except Exception as e:
+            return file_path, f"Error while reading rar content.\nBecause: {e}"
         
+    def read_7zfile(self, file_path):
+        """
+        Returns a list of file names from a 7z archive
+        """
+        try:
+
+            z_content = []
+
+            with py7zr.SevenZipFile(file_path, 'r') as z_archive:
+                z_content = z_archive.namelist()
+            
+                return z_content
+            
+        except Exception as e:
+            return file_path, f"Error while reading 7z content.\nBecause: {e}"
+        
+
+    def read_tarfile(self, file_path):
+        """
+        Returns a list of file names from a tar archive
+        """
+        try:
+
+            tar_content = []
+
+            with tarfile.open(file_path, 'r') as tar_archive:
+                tar_content = tar_archive.getnames()
+
+                return tar_content
+            
+        except Exception as e:
+            return file_path, f"Error while reading tar content.\nBecause: {e}"
+                
     def check_file_type(self, file_path):
         """
         Uses python-magic the check and return file type
@@ -286,7 +361,6 @@ class DirectorySearcherApp:
         #print(f"Filetype is: {file_type}")
 
         return file_type
-
 
     def process_file(self, args):
         """
@@ -345,6 +419,38 @@ class DirectorySearcherApp:
                                 #print(f"Added: {file_name} to results")
                                 return file_path
                             
+                    elif "zip" in file_type.lower():
+                        content = self.read_zipfile(file_path)
+
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
+                            
+                    elif "rar" in file_type.lower():
+                        content = self.read_rarfile(file_path)
+                        
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
+                            
+                    elif "7-zip" in file_type.lower():
+                        content = self.read_7zfile(file_path)
+
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
+                            
+                    elif "posix" in file_type.lower() or "tar" in file_type.lower():
+                        content = self.read_tarfile(file_path)
+
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
+                            
                     else:
                         print(f"Filetype is not supported {file_name}")
 
@@ -383,6 +489,37 @@ class DirectorySearcherApp:
                             if can_contain_keywords(paragraph, keywords):
                                 #print(f"Added: {file_name} to results")
                                 return file_path
+                    elif "zip" in file_type.lower():
+                        content = self.read_zipfile(file_path)
+
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
+                            
+                    elif "rar" in file_type.lower():
+                        content = self.read_rarfile(file_path)
+
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
+                    
+                    elif "7-zip" in file_type.lower():
+                        content = self.read_7zfile(file_path)
+
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
+                            
+                    elif "posix" in file_type.lower() or "tar" in file_type.lower():
+                        content = self.read_tarfile(file_path)
+
+                        for filename in content:
+                            if can_contain_keywords(filename, keywords):
+                                #print(f"Added: {file_name} to results")
+                                return file_path
                     else:
                         print(f"Filetype is not supported {file_name}")
                             
@@ -415,10 +552,15 @@ class DirectorySearcherApp:
             for result in results:
                 result_text.insert(tk.END, result + "\n\n")  # Add each result on a new line
 
+            save_to_archive_btn = tk.Button(self.root, text="Save to archive", command=lambda: self.add_directories_to_archive(results))
+            save_to_archive_btn.pack(pady=5)
+
         # Disable editing the Text widget
         result_text.config(state=tk.DISABLED)
 
         result_text.bind("<ButtonRelease-1>", lambda event: self.on_text_click(result_text, event))
+
+        
 
         # Retry button
         retry_btn = tk.Button(self.root, text="Retry", command=self.create_search_page)
@@ -431,7 +573,6 @@ class DirectorySearcherApp:
         # Exit button
         exit_btn = tk.Button(self.root, text="Exit", command=self.root.quit)
         exit_btn.pack(pady=5)
-
 
     def on_text_click(self, text_widget, event):
         """
@@ -463,6 +604,59 @@ class DirectorySearcherApp:
             
         except Exception as e:
             return file_path, f"Error while trying to open file on given path"
+
+    def add_directories_to_archive(self, file_paths):
+        try:
+            # Ask for the location and name of the new zip file
+            new_zipfile_path = filedialog.asksaveasfilename() + ".zip"
+
+            print(f"Creating archive at: {new_zipfile_path}")
+
+            # Open the new zip file in write mode
+            with zipfile.ZipFile(new_zipfile_path, 'w') as new_zip:
+                for file_path in file_paths:
+                    if os.path.exists(file_path):
+                        # If the path is a directory, traverse and add its contents
+                        if os.path.isdir(file_path):
+                            # Use os.walk to iterate through the directory and its subdirectories
+                            for root, dirs, files in os.walk(file_path):
+                                for file in files:
+                                    full_file_path = os.path.join(root, file)
+                                    relative_path = os.path.relpath(full_file_path, file_path)  # Get relative path
+                                    try:
+                                        new_zip.write(full_file_path, relative_path)  # Add file with relative path
+                                    except PermissionError:
+                                        print(f"Skipping file due to permission error: {full_file_path}")
+                                    except Exception as e:
+                                        print(f"Error adding file {full_file_path}: {e}")
+
+                                # Add the empty directories as well (if any)
+                                for dir_ in dirs:
+                                    dir_path = os.path.join(root, dir_)
+                                    relative_dir_path = os.path.relpath(dir_path, file_path)  # Get relative path
+                                    try:
+                                        new_zip.write(dir_path, relative_dir_path)  # Add directory with relative path
+                                    except PermissionError:
+                                        print(f"Skipping directory due to permission error: {dir_path}")
+                                    except Exception as e:
+                                        print(f"Error adding directory {dir_path}: {e}")
+                                        
+                        # If it's a file, add it directly with relative path
+                        elif os.path.isfile(file_path):
+                            relative_file_path = os.path.basename(file_path)  # Get relative path (file name only)
+                            try:
+                                new_zip.write(file_path, relative_file_path)
+                            except PermissionError:
+                                print(f"Skipping file due to permission error: {file_path}")
+                            except Exception as e:
+                                print(f"Error adding file {file_path}: {e}")
+
+            print(f"Archive created successfully at {new_zipfile_path}")
+        
+        except Exception as e:
+            print(f"Failed to create archive.\nBecause: {e}")
+
+
 
 # Main execution
 root = tk.Tk()

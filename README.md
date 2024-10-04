@@ -10,6 +10,7 @@ Directory Searcher is a Python application built using the Tkinter library. It a
 * **Deep Search** : Option to search within file contents, off by default.
 * **Batch Processing** : Files are processed in batches to improve performance.
 * **Multithreading** : Uses multithreading to speed up file search.
+* **Archive Results** : Adds the results to a archive at a choosen path.
 
 ## Limitations
 
@@ -23,6 +24,10 @@ Directory Searcher is a Python application built using the Tkinter library. It a
 * python-magic
 * openpyxl
 * python-docx
+* zipfile
+* rarfile
+* py7zr
+* tarfile
 
 ## Installation
 
@@ -58,7 +63,8 @@ Directory Searcher is a Python application built using the Tkinter library. It a
 
 ### Results Page
 
-* **Results** : Displays the search results. Open file by clicking on the path
+* **Save to archive** : If the search returned any results, you can add these to a archive.
+* **Results** : Displays the search results. Open file by clicking on the path.
 * **Retry** : Click to perform a new search.
 * **Choose Path** : Click to select a different directory.
 * **Exit** : Click to exit the application.
@@ -91,11 +97,16 @@ Directory Searcher is a Python application built using the Tkinter library. It a
 * [`read_pdf`]: Retrives PDF content page by page.
 * [`read_excel`]: Retrives Excel content row by row
 * [`read_word`]: Retrives content from word documents paragraph by paragraph
+* [`read_zipfile`]: Returns list of filenames from zip archive
+* [`read_rarfile`]: Returns list of filenames from rar archive
+* [`read_7zfile`]: Returns list of filenames from 7z archive
+* [`read_tarfile`]: Returns list of filenames from tar archive
 * [`check_file_type`]: Uses python-magic the check and return file type
 * [`process_file`]: Processes each file to check for keyword matches.
 * [`create_result_page`]: Creates the results page layout.
 * [`on_text_click`]: Retrieves the file_path based on where the user has clicked.
 * [`open_file`]: Opens file at the given path
+* [`add_directories_to_archive`]: Adds the directories and or files from the results to an archive at a choosen path
 
 ## License
 
