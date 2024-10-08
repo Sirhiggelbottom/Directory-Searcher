@@ -1,15 +1,15 @@
 import os, subprocess, platform
+
 import tkinter as tk
+from tkinter import filedialog, messagebox, Scrollbar, Listbox
+
 import time
 import concurrent.futures
 import threading
-from tkinter import filedialog, messagebox, Scrollbar, Listbox
-import PyPDF2
-import magic
-import openpyxl
-import docx
-import zipfile, rarfile, py7zr, tarfile
+from pathlib import Path
 
+import PyPDF2, magic, openpyxl, docx
+import zipfile, rarfile, py7zr, tarfile
 
 class DirectorySearcherApp:
     def __init__(self, root):
@@ -126,6 +126,17 @@ class DirectorySearcherApp:
         self.keywords = []
         self.update_keyword_buttons()
 
+    def get_chosen_file_type(self, choosen_file_type):
+        
+        if choosen_file_type == "word":
+            return {".docx"}
+        elif choosen_file_type == "excel":
+            return {".xlsx"}
+        elif choosen_file_type == "pdf":
+            return {".pdf"}
+        elif choosen_file_type == "zip":
+            return {".zip", ".rar", ".7z", ".tar"}
+
     def perform_search(self):
 
         if not self.keywords:
@@ -135,6 +146,16 @@ class DirectorySearcherApp:
             messagebox.showwarning("No Directory", "Please choose a directory.")
             return
         
+        path = Path(self.directory_path)
+
+        number_of_files = 0
+
+        file_type = self.get_chosen_file_type(self.choosen_file_type_var.get().lower())
+
+        number_of_files = sum( 1 for file in path.rglob('*') if file.is_file() and any(file.name.endswith(extension) for extension in file_type))
+
+        print(f"Number of files to search through: {number_of_files}")
+
         time.sleep(0.1)
         self.show_searching_text()
         # Perform the search
@@ -159,11 +180,14 @@ class DirectorySearcherApp:
         print(f"Choosen file type: {supported_file_types}")
 
         # Batch size for loading files in chunks
-        batch_size = 1000
+        batch_size = 500
 
         def file_batch_generator(directory, supported_file_types, batch_size):
             """Generator to yield batches of filtered files."""
-            for root, dirs, files in os.walk(directory):
+
+            directory_to_search = os.walk(directory)
+
+            for root, dirs, files in directory_to_search:
                 # Filter out files that don't have the allowed extensions
                 filtered_files = [f for f in files if any(f.lower().endswith(allowed_filetypes) for allowed_filetypes in supported_file_types)]
                 #filtered_files = [f for f in files if any(f.lower().endswith(choosen_file_type))]
@@ -176,15 +200,39 @@ class DirectorySearcherApp:
             # Initialize a list to hold the matched files
             matched_files = []
 
+            generate_batch_start_time = time.time()
+
             # Create a generator for batches of files
             file_batches = file_batch_generator(directory, supported_file_types, batch_size)
+
+            generate_batch_end_time = time.time()
+
+            generate_batch_time = generate_batch_end_time - generate_batch_start_time
+
+            print(f"It took: {generate_batch_time} seconds to generate batches")
+
+            process_batch_time_start = time.time()
 
             # Iterate over each batch of files
             for batch in file_batches:
                 matched_files.extend(batch)
 
+            process_batch_time_end = time.time()
+
+            process_batch_time = process_batch_time_end - process_batch_time_start
+
+            print(f"It took: {process_batch_time} seconds to process every batch")
+
+            search_time_start = time.time()
+
             # Launch a separate thread for the file search, ensuring the GUI remains responsive
             threading.Thread(target=self.run_search_in_thread, args=(matched_files, keywords)).start()
+
+            search_time_end = time.time()
+
+            search_time = search_time_end - search_time_start
+
+            print(f"It took: {search_time} seconds to search through the filtered files")
 
         except Exception as e:
             print(f"Error searching files: {e}")
@@ -212,28 +260,41 @@ class DirectorySearcherApp:
         # Use ThreadPoolExecutor to process files in parallel, avoiding multiprocessing for GUI issues
         matched_files = []
         must_have_keys = []
+        excluded_keys = []
+
 
         for i, key in enumerate(keywords):
-            if key[-1] == "!":
-                keywords[i] = key[:-1]
-                must_have_keys.append(key)
+            if key.startswith('"') and key.endswith('"'):
+                keywords[i] = key[1:-1]
+                must_have_keys.append(keywords[i])
 
-        if len(must_have_keys) > 1:
+            elif key[0] == "!":
+                keywords[i] = key[1:]
+                excluded_keys.append(keywords[i])
+
+
+
+        if len(must_have_keys) > 0:
             keywords = [key for key in keywords if key not in must_have_keys]
-            #print(f"keywords: {keywords}\nsuggestive_keys: {must_have_keys}")
+
+        if len(excluded_keys) > 0:
+            keywords = [key for key in keywords if key not in excluded_keys]
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            
-            results = executor.map(self.process_file, zip(file_paths, [keywords]*len(file_paths), [must_have_keys]*len(file_paths)))
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+
+            results = executor.map(self.process_file, zip(file_paths, [keywords]*len(file_paths), [must_have_keys]*len(file_paths), [excluded_keys]*len(file_paths)))
+
             for result in results:
                 if result:
                     matched_files.append(result)
 
         if len(matched_files) < 1:
+            print("Search completed, but no results found.")
             self.root.after(500, self.no_results_found)  # No results found, return to search page
             self.root.after(500, self.create_search_page)  # No results found, return to search page
         else:
-            # Once search is done, update the UI on the main thread
+            #  Once search is done, update the UI on the main thread
+            print("Search completed.")
             self.root.after(500, self.hide_searching_text)
             self.root.after(1000, self.create_result_page, matched_files)
 
@@ -334,7 +395,6 @@ class DirectorySearcherApp:
         except Exception as e:
             return file_path, f"Error while reading 7z content.\nBecause: {e}"
         
-
     def read_tarfile(self, file_path):
         """
         Returns a list of file names from a tar archive
@@ -367,29 +427,160 @@ class DirectorySearcherApp:
         Function to process each file and check if the keywords match.
         This function is designed to run in parallel using multiprocessing.
         """
+
+        process_file_time_start = time.time()
+        process_file_time_end = 0
+        process_file_time = 0
+
         #file_path, keywords, suggestive_keys = zip(*args)
         file_path = args[0]
         keywords = args[1]
         must_have_keys = args[2]
+        excluded_keys = args[3]
+        file_name = os.path.basename(file_path)
 
-        def must_contain_keywords(target, must_have_keys):
+        def contains_all_keywords(target, must_have_keys):
             """Check if all keywords are present in the target string."""
             return all(keyword.lower() in target.lower() for keyword in must_have_keys)
         
-        def can_contain_keywords(target, keywords):
+        def contains_any_keyword(target, keywords):
             """Check if any suggestive key is present in the target string (optional)."""
             return any(s_key.lower() in target.lower() for s_key in keywords)
         
         try:
-            file_name = os.path.basename(file_path)
-
-            if len(must_have_keys) > 0:
-
-                if can_contain_keywords(file_path, keywords) or must_have_keys(file_path, must_have_keys):
+        
+            if len(must_have_keys) > 0 and len(excluded_keys) > 0:
+            
+                if (contains_any_keyword(file_path, keywords) or contains_all_keywords(file_path, must_have_keys)) and not contains_any_keyword(file_path, excluded_keys):
                     #print(f"Added: {file_name} to results")
+                    
+                    process_file_time_end = time.time()
+                    process_file_time = process_file_time_end - process_file_time_start
+                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                     return file_path
-                elif can_contain_keywords(file_name, keywords) or must_have_keys(file_name, must_have_keys):
+                
+                elif (contains_any_keyword(file_name, keywords) or contains_all_keywords(file_name, must_have_keys)) and not contains_any_keyword(file_name, excluded_keys):
                     #print(f"Added: {file_name} to results")
+                    
+                    process_file_time_end = time.time()
+                    process_file_time = process_file_time_end - process_file_time_start
+                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                    return file_path
+                
+                elif self.deep_search_var.get():
+                    
+                    file_type = self.check_file_type(file_path)
+
+                    if "pdf" in file_type.lower():
+                        content = self.read_pdf(file_path)
+
+                        for page in content:
+                            if (contains_any_keyword(page, keywords) or contains_all_keywords(page, must_have_keys)) and not contains_any_keyword(page, excluded_keys):
+                                ##print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                                return file_path
+                    
+                    elif "excel" in file_type.lower():
+                        content = self.read_excel(file_path)
+
+                        for sheet in content:
+                            if (contains_any_keyword(sheet, keywords) or contains_all_keywords(sheet, must_have_keys)) and not contains_any_keyword(sheet, excluded_keys):
+                                #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                                return file_path
+                    
+                    elif "word" in file_type.lower():
+                        content = self.read_word(file_path)
+
+                        for paragraph in content:
+                            if (contains_any_keyword(paragraph, keywords) or contains_all_keywords(paragraph, must_have_keys)) and not contains_any_keyword(paragraph, excluded_keys):
+                                #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                                return file_path
+
+                    elif "zip" in file_type.lower():
+                        content = self.read_zipfile(file_path)
+
+                        for filename in content:
+                            if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
+                                #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                                return file_path
+                            
+                    elif "rar" in file_type.lower():
+                        content = self.read_rarfile(file_path)
+                        
+                        for filename in content:
+                            if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
+                                #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                                return file_path
+                            
+                    elif "7-zip" in file_type.lower():
+                        content = self.read_7zfile(file_path)
+
+                        for filename in content:
+                            if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
+                                #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                                return file_path
+                            
+                    elif "posix" in file_type.lower() or "tar" in file_type.lower():
+                        content = self.read_tarfile(file_path)
+
+                        for filename in content:
+                            if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
+                                #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
+                                return file_path
+
+            elif len(must_have_keys) > 0:
+
+                if contains_any_keyword(file_path, keywords) or contains_all_keywords(file_path, must_have_keys):
+                    #print(f"Added: {file_name} to results")
+
+                    process_file_time_end = time.time()
+                    process_file_time = process_file_time_end - process_file_time_start
+                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    
+                    return file_path
+                elif contains_any_keyword(file_name, keywords) or contains_all_keywords(file_name, must_have_keys):
+                    #print(f"Added: {file_name} to results")
+                    
+                    process_file_time_end = time.time()
+                    process_file_time = process_file_time_end - process_file_time_start
+                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    
                     return file_path                
                 elif self.deep_search_var.get():
 
@@ -399,67 +590,112 @@ class DirectorySearcherApp:
                         content = self.read_pdf(file_path)
 
                         for page in content:
-                            if can_contain_keywords(page, keywords) or must_contain_keywords(page, must_have_keys):
+                            if contains_any_keyword(page, keywords) or contains_all_keywords(page, must_have_keys):
                                 ##print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                
                                 return file_path
                             
                     elif "excel" in file_type.lower():
                         content = self.read_excel(file_path)
 
                         for sheet in content:
-                            if can_contain_keywords(sheet, keywords) or must_contain_keywords(sheet, must_have_keys):
+                            if contains_any_keyword(sheet, keywords) or contains_all_keywords(sheet, must_have_keys):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                
                                 return file_path
                             
                     elif "word" in file_type.lower():
                         content = self.read_word(file_path)
 
                         for paragraph in content:
-                            if can_contain_keywords(paragraph, keywords) or must_contain_keywords(paragraph, must_have_keys):
+                            if contains_any_keyword(paragraph, keywords) or contains_all_keywords(paragraph, must_have_keys):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                             
                     elif "zip" in file_type.lower():
                         content = self.read_zipfile(file_path)
 
                         for filename in content:
-                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                            if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                             
                     elif "rar" in file_type.lower():
                         content = self.read_rarfile(file_path)
                         
                         for filename in content:
-                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                            if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                             
                     elif "7-zip" in file_type.lower():
                         content = self.read_7zfile(file_path)
 
                         for filename in content:
-                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                            if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                             
                     elif "posix" in file_type.lower() or "tar" in file_type.lower():
                         content = self.read_tarfile(file_path)
 
                         for filename in content:
-                            if can_contain_keywords(filename, keywords) or must_contain_keywords(filename, must_have_keys):
+                            if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                             
                     else:
                         print(f"Filetype is not supported {file_name}")
 
             else:
-                if can_contain_keywords(file_name, keywords):
+                if contains_any_keyword(file_name, keywords):
                     #print(f"Added: {file_name} to results")
+                    
+                    process_file_time_end = time.time()
+                    process_file_time = process_file_time_end - process_file_time_start
+                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                     return file_path
-                elif can_contain_keywords(file_path, keywords):
+                elif contains_any_keyword(file_path, keywords):
                     #print(f"Added: {file_name} to results")
+                    
+                    process_file_time_end = time.time()
+                    process_file_time = process_file_time_end - process_file_time_start
+                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                     return file_path
                 elif self.deep_search_var.get():
                     #if self.check_file_type_1(file_path) == "application/pdf":
@@ -470,63 +706,107 @@ class DirectorySearcherApp:
                         content = self.read_pdf(file_path)
 
                         for page in content:
-                            if can_contain_keywords(page, keywords):
+                            if contains_any_keyword(page, keywords):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
 
                     elif "excel" in file_type.lower():
                         content = self.read_excel(file_path)
 
                         for sheet in content:
-                            if can_contain_keywords(sheet, keywords):
+                            if contains_any_keyword(sheet, keywords):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                     
                     elif "word" in file_type.lower():
                         content = self.read_word(file_path)
 
                         for paragraph in content:
-                            if can_contain_keywords(paragraph, keywords):
+                            if contains_any_keyword(paragraph, keywords):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                     elif "zip" in file_type.lower():
                         content = self.read_zipfile(file_path)
 
                         for filename in content:
-                            if can_contain_keywords(filename, keywords):
+                            if contains_any_keyword(filename, keywords):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                             
                     elif "rar" in file_type.lower():
                         content = self.read_rarfile(file_path)
 
                         for filename in content:
-                            if can_contain_keywords(filename, keywords):
+                            if contains_any_keyword(filename, keywords):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                     
                     elif "7-zip" in file_type.lower():
                         content = self.read_7zfile(file_path)
 
                         for filename in content:
-                            if can_contain_keywords(filename, keywords):
+                            if contains_any_keyword(filename, keywords):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                             
                     elif "posix" in file_type.lower() or "tar" in file_type.lower():
                         content = self.read_tarfile(file_path)
 
                         for filename in content:
-                            if can_contain_keywords(filename, keywords):
+                            if contains_any_keyword(filename, keywords):
                                 #print(f"Added: {file_name} to results")
+                                
+                                process_file_time_end = time.time()
+                                process_file_time = process_file_time_end - process_file_time_start
+                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+
                                 return file_path
                     else:
                         print(f"Filetype is not supported {file_name}")
-                            
+                        
+            process_file_time_end = time.time()
+            process_file_time = process_file_time_end - process_file_time_start
+            print(f"It took: {process_file_time} seconds to process: {file_name}")
+
             return None
         
         except Exception as e:
             print(f"Error reading file {file_path}\nBecause: {e}")
+
+            process_file_time_end = time.time()
+            process_file_time = process_file_time_end - process_file_time_start
+            print(f"It took: {process_file_time} seconds to process: {file_name}")
+
             return None
 
     def create_result_page(self, results):
@@ -655,8 +935,6 @@ class DirectorySearcherApp:
         
         except Exception as e:
             print(f"Failed to create archive.\nBecause: {e}")
-
-
 
 # Main execution
 root = tk.Tk()
