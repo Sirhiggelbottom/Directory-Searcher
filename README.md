@@ -22,7 +22,7 @@
 * *Python 3.x*
 * *Tkinter (usually included with Python installations)*
 * *PyPDF2*
-* *python-magic*
+* *python-magic-bin*
 * *openpyxl*
 * *python-docx*
 * *zipfile*

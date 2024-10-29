@@ -10,6 +10,12 @@ from pathlib import Path
 
 import PyPDF2, magic, openpyxl, docx
 import zipfile, rarfile, py7zr, tarfile
+from decimal import *
+
+long_processes = []
+
+files_to_search = 0
+search_started = 0
 
 class DirectorySearcherApp:
     def __init__(self, root):
@@ -79,7 +85,7 @@ class DirectorySearcherApp:
         deep_search_check = tk.Checkbutton(row_1_button_frame, text="Deep search", variable=self.deep_search_var)
         deep_search_check.grid(row=0, column=0, padx=5, pady=5)  # Align to the left
 
-        self.file_types = ["PDF", "Excel", "Word", "zip"]
+        self.file_types = ["Any","PDF", "Excel", "Word", "zip"]
         self.choosen_file_type_var = tk.StringVar(value=self.file_types[0])
         file_type_dropdown = tk.OptionMenu(row_1_button_frame, self.choosen_file_type_var, *self.file_types)
         file_type_dropdown.grid(row=0, column=1, padx=5, pady=5)
@@ -88,7 +94,8 @@ class DirectorySearcherApp:
         row_2_button_frame.pack(fill="y", padx=10, pady=5)
         
         # Search button - Center this frame within the root window
-        search_btn = tk.Button(row_2_button_frame, text="Search", command=self.perform_search)
+        search_btn = tk.Button(row_2_button_frame, text="Search", command=lambda: self.root.after(500, self.perform_search))
+        #search_btn = tk.Button(row_2_button_frame, text="Search", command=lambda: self.root.after(1000, self.test))
         search_btn.grid(row=0, column=0, padx=5, pady=5)  # Align to the right
 
         # Other buttons
@@ -100,6 +107,9 @@ class DirectorySearcherApp:
 
         exit_btn = tk.Button(row_2_button_frame, text="Exit", command=self.root.quit)
         exit_btn.grid(row=3, column=0, padx=5, pady=5)  # Center in the next row
+
+    def test(self):
+        print(f"Valgt filtype: {self.choosen_file_type_var.get().lower()}")
 
     def add_keyword(self, event=None):
         keyword = self.keyword_entry.get().strip()
@@ -136,8 +146,13 @@ class DirectorySearcherApp:
             return {".pdf"}
         elif choosen_file_type == "zip":
             return {".zip", ".rar", ".7z", ".tar"}
+        elif choosen_file_type == "any":
+            return {".docx", ".xlsx", ".pdf", ".zip", ".rar", ".7z", ".tar"}
 
     def perform_search(self):
+        self.show_searching_text()
+        global search_started
+        search_started = time.time()
 
         if not self.keywords:
             messagebox.showwarning("No Keywords", "Please enter at least one keyword.")
@@ -148,16 +163,17 @@ class DirectorySearcherApp:
         
         path = Path(self.directory_path)
 
-        number_of_files = 0
+        global files_to_search
 
         file_type = self.get_chosen_file_type(self.choosen_file_type_var.get().lower())
 
-        number_of_files = sum( 1 for file in path.rglob('*') if file.is_file() and any(file.name.endswith(extension) for extension in file_type))
+        
+        files_to_search = sum(1 for file in path.rglob('*') if file.is_file() and any(file.name.endswith(extension) for extension in file_type))
 
-        print(f"Number of files to search through: {number_of_files}")
+        print(f"Number of files to search through: {files_to_search}")
 
-        time.sleep(0.1)
-        self.show_searching_text()
+        time.sleep(0.2)
+        
         # Perform the search
         self.search_files(self.directory_path, self.keywords)
 
@@ -166,7 +182,7 @@ class DirectorySearcherApp:
         #allowed_extensions = {".pdf", ".xlsx", ".docx", ".zip"}  # Set of allowed extensions
         supported_file_types = {}  # Set of allowed extensions
         
-        choosen_file_type = self.choosen_file_type_var.get().lower()
+        """choosen_file_type = self.choosen_file_type_var.get().lower()
 
         if choosen_file_type == "word":
             supported_file_types = {".docx"}
@@ -175,7 +191,9 @@ class DirectorySearcherApp:
         elif choosen_file_type == "pdf":
             supported_file_types = {".pdf"}
         elif choosen_file_type == "zip":
-            supported_file_types = {".zip", ".rar", ".7z", ".tar"}
+            supported_file_types = {".zip", ".rar", ".7z", ".tar"}"""
+        
+        supported_file_types = self.get_chosen_file_type(self.choosen_file_type_var.get().lower())
             
         print(f"Choosen file type: {supported_file_types}")
 
@@ -197,6 +215,8 @@ class DirectorySearcherApp:
                     yield [os.path.join(root, f) for f in filtered_files[i:i + batch_size]]
 
         try:
+            getcontext().prec = 3
+            getcontext().rounding = 'ROUND_HALF_UP'
             # Initialize a list to hold the matched files
             matched_files = []
 
@@ -207,7 +227,7 @@ class DirectorySearcherApp:
 
             generate_batch_end_time = time.time()
 
-            generate_batch_time = generate_batch_end_time - generate_batch_start_time
+            generate_batch_time = Decimal(generate_batch_end_time) - Decimal(generate_batch_start_time)
 
             print(f"It took: {generate_batch_time} seconds to generate batches")
 
@@ -217,9 +237,12 @@ class DirectorySearcherApp:
             for batch in file_batches:
                 matched_files.extend(batch)
 
+            getcontext().prec = 3
+            getcontext().rounding = 'ROUND_HALF_UP'
+            
             process_batch_time_end = time.time()
 
-            process_batch_time = process_batch_time_end - process_batch_time_start
+            process_batch_time = Decimal(process_batch_time_end) - Decimal(process_batch_time_start)
 
             print(f"It took: {process_batch_time} seconds to process every batch")
 
@@ -230,7 +253,7 @@ class DirectorySearcherApp:
 
             search_time_end = time.time()
 
-            search_time = search_time_end - search_time_start
+            search_time = Decimal(search_time_end) - Decimal(search_time_start)
 
             print(f"It took: {search_time} seconds to search through the filtered files")
 
@@ -241,14 +264,17 @@ class DirectorySearcherApp:
     def show_searching_text(self):
         self.searching_label = tk.Label(self.root, text="Searching...", font=("Arial", 14))
         self.searching_label.pack(pady=10)
+        self.root.title("Directory Searcher searching...")
 
     def hide_searching_text(self):
         if hasattr(self, "searching_label"):
             self.searching_label.pack_forget()
+            self.root.title("Directory Searcher")
 
     def no_results_found(self):
         if hasattr(self, "searching_label"):
             self.searching_label.pack_forget()
+            self.root.title("Directory Searcher")
 
         messagebox.showinfo("No Results", "No results found. Please try again.")
     
@@ -288,15 +314,26 @@ class DirectorySearcherApp:
                 if result:
                     matched_files.append(result)
 
+        self.root.after(500, self.hide_searching_text)
+        self.root.after(500, self.print_long_processes)
+
+        global search_started
+        search_ended = time.time()
+        getcontext().prec = 4
+        getcontext().rounding = 'ROUND_HALF_UP'
+
+        search_duration = Decimal(search_ended) - Decimal(search_started)
+    
         if len(matched_files) < 1:
-            print("Search completed, but no results found.")
+            print(f"Search completed, but no results found.\nSearch took {search_duration} seconds.\n")
             self.root.after(500, self.no_results_found)  # No results found, return to search page
-            self.root.after(500, self.create_search_page)  # No results found, return to search page
+            self.root.after(1000, self.create_search_page)  # No results found, return to search page
+            
         else:
             #  Once search is done, update the UI on the main thread
-            print("Search completed.")
-            self.root.after(500, self.hide_searching_text)
+            print(f"Search completed.\nSearch took {search_duration} seconds.\n")
             self.root.after(1000, self.create_result_page, matched_files)
+            
 
     def read_pdf(self, file_path):
         """
@@ -427,12 +464,10 @@ class DirectorySearcherApp:
         Function to process each file and check if the keywords match.
         This function is designed to run in parallel using multiprocessing.
         """
-
+        global files_to_search
+        files_to_search -= 1
         process_file_time_start = time.time()
-        process_file_time_end = 0
-        process_file_time = 0
 
-        #file_path, keywords, suggestive_keys = zip(*args)
         file_path = args[0]
         keywords = args[1]
         must_have_keys = args[2]
@@ -452,37 +487,34 @@ class DirectorySearcherApp:
             if len(must_have_keys) > 0 and len(excluded_keys) > 0:
             
                 if (contains_any_keyword(file_path, keywords) or contains_all_keywords(file_path, must_have_keys)) and not contains_any_keyword(file_path, excluded_keys):
-                    #print(f"Added: {file_name} to results")
+                    print(f"\nAdded: {file_name} to results\n")
                     
-                    process_file_time_end = time.time()
-                    process_file_time = process_file_time_end - process_file_time_start
-                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    self.calc_process_time(process_file_time_start, file_name)
 
                     return file_path
                 
                 elif (contains_any_keyword(file_name, keywords) or contains_all_keywords(file_name, must_have_keys)) and not contains_any_keyword(file_name, excluded_keys):
-                    #print(f"Added: {file_name} to results")
+                    print(f"\nAdded: {file_name} to results\n")
                     
-                    process_file_time_end = time.time()
-                    process_file_time = process_file_time_end - process_file_time_start
-                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    self.calc_process_time(process_file_time_start, file_name)
 
                     return file_path
                 
                 elif self.deep_search_var.get():
                     
                     file_type = self.check_file_type(file_path)
+                    if "cannot open" in file_type.lower():
+                        print(f"Cannot open file: {file_name}")
+                        return None
 
                     if "pdf" in file_type.lower():
                         content = self.read_pdf(file_path)
 
                         for page in content:
                             if (contains_any_keyword(page, keywords) or contains_all_keywords(page, must_have_keys)) and not contains_any_keyword(page, excluded_keys):
-                                ##print(f"Added: {file_name} to results")
+                                #print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                     
@@ -491,11 +523,9 @@ class DirectorySearcherApp:
 
                         for sheet in content:
                             if (contains_any_keyword(sheet, keywords) or contains_all_keywords(sheet, must_have_keys)) and not contains_any_keyword(sheet, excluded_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                     
@@ -504,11 +534,9 @@ class DirectorySearcherApp:
 
                         for paragraph in content:
                             if (contains_any_keyword(paragraph, keywords) or contains_all_keywords(paragraph, must_have_keys)) and not contains_any_keyword(paragraph, excluded_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
 
@@ -517,11 +545,9 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -530,11 +556,9 @@ class DirectorySearcherApp:
                         
                         for filename in content:
                             if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -543,11 +567,9 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -556,46 +578,42 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if (contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys)) and not contains_any_keyword(filename, excluded_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
 
             elif len(must_have_keys) > 0:
 
                 if contains_any_keyword(file_path, keywords) or contains_all_keywords(file_path, must_have_keys):
-                    #print(f"Added: {file_name} to results")
+                    print(f"\nAdded: {file_name} to results\n")
 
-                    process_file_time_end = time.time()
-                    process_file_time = process_file_time_end - process_file_time_start
-                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    self.calc_process_time(process_file_time_start, file_name)
                     
                     return file_path
                 elif contains_any_keyword(file_name, keywords) or contains_all_keywords(file_name, must_have_keys):
-                    #print(f"Added: {file_name} to results")
+                    print(f"\nAdded: {file_name} to results\n")
                     
-                    process_file_time_end = time.time()
-                    process_file_time = process_file_time_end - process_file_time_start
-                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    self.calc_process_time(process_file_time_start, file_name)
                     
                     return file_path                
                 elif self.deep_search_var.get():
 
                     file_type = self.check_file_type(file_path)
 
+                    if "cannot open" in file_type.lower():
+                        print(f"Cannot open file: {file_name}")
+                        return None
+
                     if "pdf" in file_type.lower():
                         content = self.read_pdf(file_path)
 
                         for page in content:
                             if contains_any_keyword(page, keywords) or contains_all_keywords(page, must_have_keys):
-                                ##print(f"Added: {file_name} to results")
+                                #print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
                                 
                                 return file_path
                             
@@ -604,11 +622,9 @@ class DirectorySearcherApp:
 
                         for sheet in content:
                             if contains_any_keyword(sheet, keywords) or contains_all_keywords(sheet, must_have_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
                                 
                                 return file_path
                             
@@ -617,11 +633,9 @@ class DirectorySearcherApp:
 
                         for paragraph in content:
                             if contains_any_keyword(paragraph, keywords) or contains_all_keywords(paragraph, must_have_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -630,11 +644,9 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -643,11 +655,9 @@ class DirectorySearcherApp:
                         
                         for filename in content:
                             if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -656,11 +666,9 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -669,37 +677,35 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if contains_any_keyword(filename, keywords) or contains_all_keywords(filename, must_have_keys):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
                     else:
-                        print(f"Filetype is not supported {file_name}")
+                        print(f"Filetype is not supported {file_name}\nFiletype was: {file_type}\n")
 
             else:
                 if contains_any_keyword(file_name, keywords):
-                    #print(f"Added: {file_name} to results")
+                    print(f"\nAdded: {file_name} to results\n")
                     
-                    process_file_time_end = time.time()
-                    process_file_time = process_file_time_end - process_file_time_start
-                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    self.calc_process_time(process_file_time_start, file_name)
 
                     return file_path
                 elif contains_any_keyword(file_path, keywords):
-                    #print(f"Added: {file_name} to results")
+                    print(f"\nAdded: {file_name} to results\n")
                     
-                    process_file_time_end = time.time()
-                    process_file_time = process_file_time_end - process_file_time_start
-                    print(f"It took: {process_file_time} seconds to process: {file_name}")
+                    self.calc_process_time(process_file_time_start, file_name)
 
                     return file_path
                 elif self.deep_search_var.get():
-                    #if self.check_file_type_1(file_path) == "application/pdf":
+                
                     file_type = self.check_file_type(file_path)
+
+                    if "cannot open" in file_type.lower():
+                        print(f"Cannot open file: {file_name}")
+                        return None
 
                     if "pdf" in file_type.lower():
                         #content = self.read_pdf_1(file_path)
@@ -707,11 +713,9 @@ class DirectorySearcherApp:
 
                         for page in content:
                             if contains_any_keyword(page, keywords):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
 
@@ -720,11 +724,9 @@ class DirectorySearcherApp:
 
                         for sheet in content:
                             if contains_any_keyword(sheet, keywords):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                     
@@ -733,11 +735,9 @@ class DirectorySearcherApp:
 
                         for paragraph in content:
                             if contains_any_keyword(paragraph, keywords):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                     elif "zip" in file_type.lower():
@@ -745,11 +745,9 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if contains_any_keyword(filename, keywords):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -758,11 +756,9 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if contains_any_keyword(filename, keywords):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                     
@@ -771,11 +767,9 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if contains_any_keyword(filename, keywords):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                             
@@ -784,30 +778,26 @@ class DirectorySearcherApp:
 
                         for filename in content:
                             if contains_any_keyword(filename, keywords):
-                                #print(f"Added: {file_name} to results")
+                                print(f"\nAdded: {file_name} to results\n")
                                 
-                                process_file_time_end = time.time()
-                                process_file_time = process_file_time_end - process_file_time_start
-                                print(f"It took: {process_file_time} seconds to process: {file_name}")
+                                self.calc_process_time(process_file_time_start, file_name)
 
                                 return file_path
                     else:
-                        print(f"Filetype is not supported {file_name}")
+                        print(f"Filetype is not supported {file_name}\nFiletype was: {file_type}\n")
                         
-            process_file_time_end = time.time()
-            process_file_time = process_file_time_end - process_file_time_start
-            print(f"It took: {process_file_time} seconds to process: {file_name}")
+            self.calc_process_time(process_file_time_start, file_name)
 
             return None
         
         except Exception as e:
-            print(f"Error reading file {file_path}\nBecause: {e}")
+            print(f"Error reading file {file_path}\nBecause: {e}\n")
 
-            process_file_time_end = time.time()
-            process_file_time = process_file_time_end - process_file_time_start
-            print(f"It took: {process_file_time} seconds to process: {file_name}")
+            self.calc_process_time(process_file_time_start, file_name)
 
             return None
+           
+
 
     def create_result_page(self, results):
     # Result page layout
@@ -935,6 +925,30 @@ class DirectorySearcherApp:
         
         except Exception as e:
             print(f"Failed to create archive.\nBecause: {e}")
+
+    def calc_process_time(self, start_time, file_name):
+        global files_to_search
+        getcontext().prec = 4
+        getcontext().rounding = 'ROUND_HALF_UP'
+
+        process_file_time_end = Decimal(time.time())
+        process_file_time = process_file_time_end - Decimal(start_time)
+        if process_file_time > 20:
+            
+            long_processes.append({"file_name" : file_name, "process_time": process_file_time})
+        print(f"It took: {process_file_time} seconds to process: {file_name}\n- Remaining files: {files_to_search}\n")
+
+    def print_long_processes(self):       
+        
+        if len(long_processes) < 1:
+            print("\nAll processes took less than 20 seconds!")
+            return
+        else:
+            
+            print("Files that took more than 20 seconds to process:\n")
+            for process in long_processes:
+                print(f"{process['file_name']} took: {process['process_time']} seconds to complete\n")
+
 
 # Main execution
 root = tk.Tk()
