@@ -6,6 +6,7 @@ from tkinter import filedialog, messagebox, Scrollbar, Listbox
 import time
 import concurrent.futures
 import threading
+import psutil
 from pathlib import Path
 
 import PyPDF2, magic, openpyxl, docx
@@ -16,6 +17,9 @@ long_processes = []
 
 files_to_search = 0
 search_started = 0
+terminated_tasks = []
+memory_threshold = 3072
+supported_file_types = {}
 
 class DirectorySearcherApp:
     def __init__(self, root):
@@ -163,14 +167,12 @@ class DirectorySearcherApp:
         
         path = Path(self.directory_path)
 
-        global files_to_search
-
-        file_type = self.get_chosen_file_type(self.choosen_file_type_var.get().lower())
-
         
-        files_to_search = sum(1 for file in path.rglob('*') if file.is_file() and any(file.name.endswith(extension) for extension in file_type))
 
-        print(f"Number of files to search through: {files_to_search}")
+
+        #files_to_search = sum(1 for file in path.rglob('*') if file.is_file() and any(file.name.endswith(extension) for extension in file_type))
+
+
 
         time.sleep(0.2)
         
@@ -180,7 +182,7 @@ class DirectorySearcherApp:
     def search_files(self, directory, keywords):
         # Define the file type filter
         #allowed_extensions = {".pdf", ".xlsx", ".docx", ".zip"}  # Set of allowed extensions
-        supported_file_types = {}  # Set of allowed extensions
+        global supported_file_types
         
         """choosen_file_type = self.choosen_file_type_var.get().lower()
 
@@ -220,18 +222,8 @@ class DirectorySearcherApp:
             # Initialize a list to hold the matched files
             matched_files = []
 
-            generate_batch_start_time = time.time()
-
             # Create a generator for batches of files
             file_batches = file_batch_generator(directory, supported_file_types, batch_size)
-
-            generate_batch_end_time = time.time()
-
-            generate_batch_time = Decimal(generate_batch_end_time) - Decimal(generate_batch_start_time)
-
-            print(f"It took: {generate_batch_time} seconds to generate batches")
-
-            process_batch_time_start = time.time()
 
             # Iterate over each batch of files
             for batch in file_batches:
@@ -239,12 +231,6 @@ class DirectorySearcherApp:
 
             getcontext().prec = 3
             getcontext().rounding = 'ROUND_HALF_UP'
-            
-            process_batch_time_end = time.time()
-
-            process_batch_time = Decimal(process_batch_time_end) - Decimal(process_batch_time_start)
-
-            print(f"It took: {process_batch_time} seconds to process every batch")
 
             search_time_start = time.time()
 
@@ -262,19 +248,19 @@ class DirectorySearcherApp:
             return []
     
     def show_searching_text(self):
-        self.searching_label = tk.Label(self.root, text="Searching...", font=("Arial", 14))
-        self.searching_label.pack(pady=10)
+        """self.searching_label = tk.Label(self.root, text="Searching...", font=("Arial", 14))
+        self.searching_label.pack(pady=10)"""
         self.root.title("Directory Searcher searching...")
 
     def hide_searching_text(self):
-        if hasattr(self, "searching_label"):
-            self.searching_label.pack_forget()
-            self.root.title("Directory Searcher")
+        """if hasattr(self, "searching_label"):
+            self.searching_label.pack_forget()"""
+        self.root.title("Directory Searcher")
 
     def no_results_found(self):
-        if hasattr(self, "searching_label"):
-            self.searching_label.pack_forget()
-            self.root.title("Directory Searcher")
+        """if hasattr(self, "searching_label"):
+            self.searching_label.pack_forget()"""
+        self.root.title("Directory Searcher")
 
         messagebox.showinfo("No Results", "No results found. Please try again.")
     
@@ -287,7 +273,7 @@ class DirectorySearcherApp:
         matched_files = []
         must_have_keys = []
         excluded_keys = []
-
+        global terminated_tasks
 
         for i, key in enumerate(keywords):
             if key.startswith('"') and key.endswith('"'):
@@ -306,13 +292,40 @@ class DirectorySearcherApp:
         if len(excluded_keys) > 0:
             keywords = [key for key in keywords if key not in excluded_keys]
         
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        """with concurrent.futures.ThreadPoolExecutor() as executor:
 
             results = executor.map(self.process_file, zip(file_paths, [keywords]*len(file_paths), [must_have_keys]*len(file_paths), [excluded_keys]*len(file_paths)))
 
             for result in results:
                 if result:
-                    matched_files.append(result)
+                    matched_files.append(result)"""
+        
+        # Use ThreadPoolExecutor to process files in parallel, avoiding multiprocessing for GUI issues
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {executor.submit(self.process_file, (file_path, keywords, must_have_keys, excluded_keys)): file_path for file_path in file_paths}
+            running_threads = len(futures)
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    # MODIFICATION: Monitor memory usage and terminate thread if memory usage exceeds limit
+                    if self.is_memory_usage_high() and running_threads > 1:  # Check if memory usage exceeds threshold and ensure at least one thread is running
+                        future.cancel()  # Cancel the current thread
+                        terminated_tasks.append(futures[future])  # Add the terminated task to the list
+                        running_threads -= 1
+                        print(f"Thread terminated due to high memory usage. Task: {futures[future]}")
+                    else:
+                        result = future.result()
+                        if result:  # If a match was found, add it to matched_files
+                            matched_files.append(result)
+                except Exception as e:
+                    print(f"Error occurred: {e}")
+
+        # MODIFICATION: Reprocess terminated tasks
+        if terminated_tasks:
+            print("Reprocessing terminated tasks...")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                for result in executor.map(self.process_file, [(task, keywords, must_have_keys, excluded_keys) for task in terminated_tasks]):
+                    if result:
+                        matched_files.append(result)
 
         self.root.after(500, self.hide_searching_text)
         self.root.after(500, self.print_long_processes)
@@ -334,6 +347,14 @@ class DirectorySearcherApp:
             print(f"Search completed.\nSearch took {search_duration} seconds.\n")
             self.root.after(1000, self.create_result_page, matched_files)
             
+    def is_memory_usage_high(self):
+        """
+        Function to check if the memory usage exceeds the defined threshold.
+        """
+        global memory_threshold
+        process = psutil.Process(os.getpid())
+        memory_used_mb = process.memory_info().rss / (1024 * 1024)  # Convert bytes to MB
+        return memory_used_mb > memory_threshold
 
     def read_pdf(self, file_path):
         """
@@ -341,13 +362,15 @@ class DirectorySearcherApp:
         """
 
         try:
-            with open(file_path, 'rb') as file:
+            with open(file_path, 'rb', buffering=1024*1024) as file:
                 reader = PyPDF2.PdfReader(file)
 
                 pdf_text = []
 
                 for page in reader.pages:
                     pdf_text.append(page.extract_text())
+
+                file.close()
                 
                 return pdf_text
             
@@ -396,6 +419,8 @@ class DirectorySearcherApp:
 
             with zipfile.ZipFile(file_path, 'r') as zip_archive:
                 zip_content = zip_archive.namelist()
+                
+                zip_archive.close()
 
                 return zip_content
         except Exception as e:
@@ -412,6 +437,7 @@ class DirectorySearcherApp:
             with rarfile.RarFile(file_path, 'r') as rar_archive:
                 rar_content = rar_archive.namelist()
 
+                rar_archive.close()
                 return rar_content
         except Exception as e:
             return file_path, f"Error while reading rar content.\nBecause: {e}"
@@ -426,7 +452,8 @@ class DirectorySearcherApp:
 
             with py7zr.SevenZipFile(file_path, 'r') as z_archive:
                 z_content = z_archive.namelist()
-            
+
+                z_archive.close()
                 return z_content
             
         except Exception as e:
@@ -443,29 +470,19 @@ class DirectorySearcherApp:
             with tarfile.open(file_path, 'r') as tar_archive:
                 tar_content = tar_archive.getnames()
 
+                tar_archive.close()
                 return tar_content
             
         except Exception as e:
             return file_path, f"Error while reading tar content.\nBecause: {e}"
                 
-    def check_file_type(self, file_path):
-        """
-        Uses python-magic the check and return file type
-        """
-        file_magic = magic.Magic()
-        file_type = file_magic.from_file(file_path)
-
-        #print(f"Filetype is: {file_type}")
-
-        return file_type
 
     def process_file(self, args):
         """
         Function to process each file and check if the keywords match.
         This function is designed to run in parallel using multiprocessing.
         """
-        global files_to_search
-        files_to_search -= 1
+        global supported_file_types
         process_file_time_start = time.time()
 
         file_path = args[0]
@@ -502,8 +519,9 @@ class DirectorySearcherApp:
                 
                 elif self.deep_search_var.get():
                     
-                    file_type = self.check_file_type(file_path)
-                    if "cannot open" in file_type.lower():
+                    file_type = next((supported_file_type for supported_file_type in supported_file_types if supported_file_type in file_path), None)
+                    
+                    if file_type == None:
                         print(f"Cannot open file: {file_name}")
                         return None
 
@@ -600,9 +618,9 @@ class DirectorySearcherApp:
                     return file_path                
                 elif self.deep_search_var.get():
 
-                    file_type = self.check_file_type(file_path)
-
-                    if "cannot open" in file_type.lower():
+                    file_type = next((supported_file_type for supported_file_type in supported_file_types if supported_file_type in file_path), None)
+                    
+                    if file_type == None:
                         print(f"Cannot open file: {file_name}")
                         return None
 
@@ -701,9 +719,9 @@ class DirectorySearcherApp:
                     return file_path
                 elif self.deep_search_var.get():
                 
-                    file_type = self.check_file_type(file_path)
-
-                    if "cannot open" in file_type.lower():
+                    file_type = next((supported_file_type for supported_file_type in supported_file_types if supported_file_type in file_path), None)
+                    
+                    if file_type == None:
                         print(f"Cannot open file: {file_name}")
                         return None
 
@@ -927,7 +945,6 @@ class DirectorySearcherApp:
             print(f"Failed to create archive.\nBecause: {e}")
 
     def calc_process_time(self, start_time, file_name):
-        global files_to_search
         getcontext().prec = 4
         getcontext().rounding = 'ROUND_HALF_UP'
 
@@ -936,7 +953,7 @@ class DirectorySearcherApp:
         if process_file_time > 20:
             
             long_processes.append({"file_name" : file_name, "process_time": process_file_time})
-        print(f"It took: {process_file_time} seconds to process: {file_name}\n- Remaining files: {files_to_search}\n")
+        print(f"It took: {process_file_time} seconds to process: {file_name}\n")
 
     def print_long_processes(self):       
         
