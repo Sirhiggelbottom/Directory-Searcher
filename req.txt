@@ -1,0 +1,6 @@
+PyPDF2
+python-magic-bin
+openpyxl
+python-docx
+rarfile
+py7zr
